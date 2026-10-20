@@ -1,0 +1,77 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:kmotion:project:1",
+  "title": "Keynote 动效工坊 project v1",
+  "type": "object",
+  "required": ["formatVersion", "projectID", "source", "canvas", "segments", "target", "orientation", "spans", "drawLine", "playback", "fps"],
+  "additionalProperties": false,
+  "properties": {
+    "formatVersion": {"const": 1},
+    "projectID": {"type": "string", "minLength": 1},
+    "source": {"$ref": "#/$defs/source"},
+    "canvas": {"$ref": "#/$defs/vec"},
+    "segments": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/cubic"}},
+    "target": {
+      "type": "object",
+      "required": ["name", "size", "anchor"],
+      "additionalProperties": false,
+      "properties": {
+        "name": {"type": "string"},
+        "size": {"$ref": "#/$defs/positiveVec"},
+        "anchor": {"$ref": "#/$defs/unitVec"}
+      }
+    },
+    "orientation": {"enum": ["fixed", "route-tangent"]},
+    "spans": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/span"}},
+    "drawLine": {"type": "boolean"},
+    "playback": {"enum": ["once", "loop", "ping-pong"]},
+    "fps": {"enum": [30, 60]}
+  },
+  "$defs": {
+    "vec": {
+      "type": "object",
+      "required": ["x", "y"],
+      "additionalProperties": false,
+      "properties": {"x": {"type": "number"}, "y": {"type": "number"}}
+    },
+    "positiveVec": {
+      "allOf": [{"$ref": "#/$defs/vec"}],
+      "properties": {"x": {"type": "number", "exclusiveMinimum": 0}, "y": {"type": "number", "exclusiveMinimum": 0}}
+    },
+    "unitVec": {
+      "allOf": [{"$ref": "#/$defs/vec"}],
+      "properties": {"x": {"type": "number", "minimum": 0, "maximum": 1}, "y": {"type": "number", "minimum": 0, "maximum": 1}}
+    },
+    "cubic": {
+      "type": "object",
+      "required": ["p0", "p1", "p2", "p3"],
+      "additionalProperties": false,
+      "properties": {
+        "p0": {"$ref": "#/$defs/vec"},
+        "p1": {"$ref": "#/$defs/vec"},
+        "p2": {"$ref": "#/$defs/vec"},
+        "p3": {"$ref": "#/$defs/vec"}
+      }
+    },
+    "source": {
+      "type": "object",
+      "required": ["relativePath", "sha256"],
+      "additionalProperties": false,
+      "properties": {
+        "relativePath": {"type": "string"},
+        "sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"}
+      }
+    },
+    "span": {
+      "type": "object",
+      "required": ["start", "duration", "from", "to"],
+      "additionalProperties": false,
+      "properties": {
+        "start": {"type": "number", "minimum": 0},
+        "duration": {"type": "number", "exclusiveMinimum": 0},
+        "from": {"type": "number", "minimum": 0, "maximum": 1},
+        "to": {"type": "number", "minimum": 0, "maximum": 1}
+      }
+    }
+  }
+}

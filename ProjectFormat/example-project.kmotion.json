@@ -1,0 +1,97 @@
+{
+  "formatVersion": 1,
+  "projectID": "example-p1",
+  "source": {
+    "relativePath": "示例/我的演示.key",
+    "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+  },
+  "canvas": {
+    "x": 1920,
+    "y": 1080
+  },
+  "segments": [
+    {
+      "p0": {
+        "x": 150,
+        "y": 760
+      },
+      "p1": {
+        "x": 350,
+        "y": 450
+      },
+      "p2": {
+        "x": 520,
+        "y": 820
+      },
+      "p3": {
+        "x": 760,
+        "y": 570
+      }
+    },
+    {
+      "p0": {
+        "x": 760,
+        "y": 570
+      },
+      "p1": {
+        "x": 980,
+        "y": 350
+      },
+      "p2": {
+        "x": 1220,
+        "y": 720
+      },
+      "p3": {
+        "x": 1720,
+        "y": 330
+      }
+    }
+  ],
+  "target": {
+    "name": "目标对象",
+    "size": {
+      "x": 120,
+      "y": 80
+    },
+    "anchor": {
+      "x": 0.5,
+      "y": 0.5
+    }
+  },
+  "orientation": "route-tangent",
+  "spans": [
+    {
+      "start": 0,
+      "duration": 2,
+      "from": 0,
+      "to": 0.3
+    },
+    {
+      "start": 2,
+      "duration": 1,
+      "from": 0.3,
+      "to": 0.3
+    },
+    {
+      "start": 3,
+      "duration": 4,
+      "from": 0.3,
+      "to": 0.72
+    },
+    {
+      "start": 7,
+      "duration": 1,
+      "from": 0.72,
+      "to": 0.72
+    },
+    {
+      "start": 8,
+      "duration": 2,
+      "from": 0.72,
+      "to": 1
+    }
+  ],
+  "drawLine": true,
+  "playback": "once",
+  "fps": 30
+}

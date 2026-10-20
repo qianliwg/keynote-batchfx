@@ -1,0 +1,42 @@
+{
+  "Fixtures/01_anchor.key": {
+    "bytes": 492362,
+    "sha256": "dfcb020682e0cf09690c851a0a55ead6e2fc55f8e1df1fd99baef1396d4ef3bb"
+  },
+  "Fixtures/02_timing.key": {
+    "bytes": 493489,
+    "sha256": "1a3302f0b422c467473f51a89ea9897f3ad282fd009487dd30920ec56025e70d"
+  },
+  "Fixtures/03_group.key": {
+    "bytes": 492010,
+    "sha256": "45cc0332b6967c00958abcb6ed62e428c824821e6bce2102118bf9dd95ff3128"
+  },
+  "Verification/native/01_anchor-resaved.key": {
+    "bytes": 472886,
+    "sha256": "db8c1a8fa9031f0237964a44942807adb996dd7dc62e6fd5661347e0b77052f7"
+  },
+  "Verification/native/01_anchor.mov": {
+    "bytes": 537850,
+    "sha256": "20c3fe2ce2bf09b79d715402fe286b1970dd8a0c0f32a5811a06a38f2c5559ec"
+  },
+  "Verification/native/02_timing-resaved.key": {
+    "bytes": 475918,
+    "sha256": "3009b4a4566f05aedb30c7b565516e50bdfa8feb951ebc79a74421b1f56077f0"
+  },
+  "Verification/native/03_group-resaved.key": {
+    "bytes": 474549,
+    "sha256": "2373158a3a6e7e2710b585bcd1b424b0b827243881886f56f62b8bab0751f41d"
+  },
+  "ProjectFormat/project-v1.schema.json": {
+    "bytes": 2739,
+    "sha256": "a6f7564fca1d34327aa1e5e76358394e05f7567aa140a70f0f8f0b646cfc749e"
+  },
+  "ProjectFormat/example-project.kmotion.json": {
+    "bytes": 1451,
+    "sha256": "981e3d42ddd975b2d2c2d3238782e77eaa94bab0f4cf8f024166db66d3067c8e"
+  },
+  "dist/Keynote动效工坊-P1.zip": {
+    "bytes": 22960063,
+    "sha256": "e5de6258a8a6731a7ad590f9ba45a257a05838cb6bfb9aaba8c74e9c77fee575"
+  }
+}

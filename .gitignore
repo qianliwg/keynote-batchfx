@@ -1,0 +1,7 @@
+build/
+dist/
+Backups/
+__pycache__/
+*.pyc
+.DS_Store
+Verification/private/
