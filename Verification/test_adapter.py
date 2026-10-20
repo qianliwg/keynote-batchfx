@@ -9,6 +9,7 @@ import zipfile
 
 ROOT = Path(__file__).resolve().parents[1]
 RESOURCES = ROOT / 'dist/Keynote动效工坊 P2.app/Contents/Resources'
+FIXTURES_AVAILABLE = (ROOT / 'Fixtures').is_dir()
 
 
 def request(operation, **arguments):
@@ -35,6 +36,7 @@ class BundledAdapterChecks(unittest.TestCase):
         self.assertTrue(response['result']['isolated'])
         self.assertEqual(Path(response['result']['runtimePrefix']), RESOURCES / 'runtime')
 
+    @unittest.skipUnless(FIXTURES_AVAILABLE, '公开源码包不含本地 Keynote 样例')
     def test_nested_group_and_chinese_media_survive_copy(self):
         source = ROOT / 'Fixtures/03_group.key'
         before = source.read_bytes()
@@ -56,6 +58,7 @@ class BundledAdapterChecks(unittest.TestCase):
             self.assertTrue(request('inspect', path=str(output))['ok'])
         self.assertEqual(source.read_bytes(), before)
 
+    @unittest.skipUnless(FIXTURES_AVAILABLE, '公开源码包不含本地 Keynote 样例')
     def test_existing_output_is_never_replaced(self):
         source = ROOT / 'Fixtures/01_anchor.key'
         digest = hashlib.sha256(source.read_bytes()).hexdigest()
@@ -66,6 +69,7 @@ class BundledAdapterChecks(unittest.TestCase):
             self.assertFalse(result['ok'])
             self.assertEqual(output.read_bytes(), b'existing user document')
 
+    @unittest.skipUnless(FIXTURES_AVAILABLE, '公开源码包不含本地 Keynote 样例')
     def test_stale_source_blocks_output(self):
         source = ROOT / 'Fixtures/01_anchor.key'
         with tempfile.TemporaryDirectory(prefix='kmotion-stale-', dir='/private/tmp') as temp:
@@ -79,6 +83,7 @@ class BundledAdapterChecks(unittest.TestCase):
         self.assertFalse(result['ok'])
         self.assertIn('error', result)
 
+    @unittest.skipUnless(FIXTURES_AVAILABLE, '公开源码包不含本地 Keynote 样例')
     def test_extract_route_returns_portable_cubics_and_selection_ids(self):
         source = ROOT / 'Fixtures/02_timing.key'
         scene = request('inspect', path=str(source))['result']
@@ -96,6 +101,7 @@ class BundledAdapterChecks(unittest.TestCase):
         self.assertEqual(set(imported['segments'][0]), {'p0', 'p1', 'p2', 'p3'})
         self.assertEqual(imported['canvas'], {'x': 1920.0, 'y': 1080.0})
 
+    @unittest.skipUnless(FIXTURES_AVAILABLE, '公开源码包不含本地 Keynote 样例')
     def test_apply_motion_writes_a_new_verified_copy(self):
         source = ROOT / 'Fixtures/02_timing.key'
         before = source.read_bytes()

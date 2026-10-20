@@ -11,7 +11,7 @@ Keynote 动效工坊：面向 Apple Keynote 的沿线动画、路线绘制同步
 - P1 动效项目文件（`.kmotion.json`）保存来源文稿指纹、贝塞尔路线、图片内部锚点、朝向、分段时间和播放模式。
 - 运动预览支持进度拖动、播放/暂停、单次、循环、往返、路线同步绘制和沿切线旋转。
 - P2 可以从当前幻灯片的根级曲线读取真实控制点，选择根级目标对象，并把原生 Keynote 沿线动画写入一个经过媒体校验的新副本。
-- 原有 1.1 沿线动画脚本保留在本地工作目录中，P0 原生 Keynote 样例和验证报告保存在本项目的 `Fixtures/` 与 `Docs/`。
+- 原有 1.1 沿线动画脚本保留在本地工作目录中，P0 原生 Keynote 样例和验证报告保存在本项目的 `Fixtures/` 与 `Docs/`；公开源码仓库只发布代码和文档，二进制样例留在本地验证环境。
 
 ## 目录
 
@@ -21,7 +21,7 @@ MotionCore/      路线、弧长采样、时间线和项目模型
 KeynoteAdapter/  隔离运行的 Keynote 文稿适配器
 ProjectFormat/   项目 JSON Schema 和示例
 Packaging/       内置 Python 运行时和 macOS app 打包脚本
-Fixtures/        最小 Keynote 原生验证样例
+Fixtures/        本地使用的最小 Keynote 原生验证样例（公开仓库可为空）
 Verification/    回归测试、探针和原生验证产物
 Docs/            P0/P1 验证报告
 ```

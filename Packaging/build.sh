@@ -19,7 +19,11 @@ mkdir -p "$app_path/Contents/Resources/runtime"
 rsync -a --exclude __pycache__ --exclude '*.pyc' "$project_root/build/runtime/bin" "$project_root/build/runtime/lib" \
   "$project_root/build/runtime/LICENSE-CPython.txt" "$app_path/Contents/Resources/runtime/"
 rsync -a --delete --exclude __pycache__ "$project_root/KeynoteAdapter/" "$app_path/Contents/Resources/KeynoteAdapter/"
-rsync -a --delete "$project_root/Fixtures/" "$app_path/Contents/Resources/Fixtures/"
+if [[ -d "$project_root/Fixtures" ]]; then
+  rsync -a --delete "$project_root/Fixtures/" "$app_path/Contents/Resources/Fixtures/"
+else
+  mkdir -p "$app_path/Contents/Resources/Fixtures"
+fi
 rsync -a --delete "$project_root/Docs/" "$app_path/Contents/Resources/Docs/"
 rsync -a --delete "$project_root/ProjectFormat/" "$app_path/Contents/Resources/ProjectFormat/"
 cat > "$app_path/Contents/Info.plist" <<'PLIST'
