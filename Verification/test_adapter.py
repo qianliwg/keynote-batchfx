@@ -8,7 +8,7 @@ import unittest
 import zipfile
 
 ROOT = Path(__file__).resolve().parents[1]
-RESOURCES = ROOT / 'dist/Keynote动效工坊 P1.app/Contents/Resources'
+RESOURCES = ROOT / 'dist/Keynote动效工坊 P2.app/Contents/Resources'
 
 
 def request(operation, **arguments):
@@ -78,6 +78,43 @@ class BundledAdapterChecks(unittest.TestCase):
         result = request('unknownOperation')
         self.assertFalse(result['ok'])
         self.assertIn('error', result)
+
+    def test_extract_route_returns_portable_cubics_and_selection_ids(self):
+        source = ROOT / 'Fixtures/02_timing.key'
+        scene = request('inspect', path=str(source))['result']
+        roots = scene['slides'][0]['nodes']
+        route = next(n for n in roots if n.get('curve'))
+        target = next(n for n in roots
+                      if n['id'] != route['id'] and n['kind'] in ('shape', 'image', 'movie'))
+        result = request('extractRoute', path=str(source), slide=1,
+                         curve=route['id'], target=target['id'])
+        self.assertTrue(result['ok'], result)
+        imported = result['result']
+        self.assertEqual(imported['routeObjectID'], route['id'])
+        self.assertEqual(imported['targetObjectID'], target['id'])
+        self.assertGreaterEqual(len(imported['segments']), 1)
+        self.assertEqual(set(imported['segments'][0]), {'p0', 'p1', 'p2', 'p3'})
+        self.assertEqual(imported['canvas'], {'x': 1920.0, 'y': 1080.0})
+
+    def test_apply_motion_writes_a_new_verified_copy(self):
+        source = ROOT / 'Fixtures/02_timing.key'
+        before = source.read_bytes()
+        scene = request('inspect', path=str(source))['result']
+        roots = scene['slides'][0]['nodes']
+        route = next(n for n in roots if n.get('curve'))
+        target = next(n for n in roots
+                      if n['id'] != route['id'] and n['kind'] in ('shape', 'image', 'movie'))
+        with tempfile.TemporaryDirectory(prefix='kmotion-p2-', dir='/private/tmp') as temp:
+            output = Path(temp) / 'p2-沿线动画.key'
+            result = request('applyMotion', source=str(source), output=str(output),
+                             sha256=scene['source']['sha256'], slide=1,
+                             curve=route['id'], target=target['id'],
+                             duration=1.5, draw=True, align=True)
+            self.assertTrue(result['ok'], result)
+            self.assertTrue(result['result']['verified'])
+            self.assertTrue(output.exists())
+            self.assertTrue(request('inspect', path=str(output))['ok'])
+        self.assertEqual(source.read_bytes(), before)
 
 
 if __name__ == '__main__':

@@ -2,6 +2,29 @@ import SwiftUI
 import AppKit
 import UniformTypeIdentifiers
 
+private struct ImportedCanvas: Decodable {
+    var x: Double
+    var y: Double
+}
+
+private struct ImportedTarget: Decodable {
+    var id: String
+    var name: String
+    var kind: String
+    var size: [Double]
+}
+
+private struct ImportedRoute: Decodable {
+    var sceneVersion: Int
+    var slide: Int
+    var slideID: String
+    var routeObjectID: String
+    var segments: [Cubic]
+    var target: ImportedTarget?
+    var canvas: ImportedCanvas
+    var source: ProjectSource
+}
+
 @MainActor final class Workshop:ObservableObject {
     @Published var status="打开已保存的 Keynote 文稿，检查页面、对象与素材。"
     @Published var busy=false
@@ -15,11 +38,43 @@ import UniformTypeIdentifiers
     @Published var playbackSeconds=0.0
     @Published var playing=false
     @Published var projectDirty=false
+    @Published var selectedRouteID:String?
+    @Published var selectedTargetID:String?
+    @Published var applyDuration=8.0
+    @Published var applyDraw=true
+    @Published var applyAlign=true
     private var playbackTimer:Timer?
     var resources:URL {Bundle.main.resourceURL!}
     var client:AdapterClient {AdapterClient(resources:resources)}
     var slides:[[String:Any]] {result?["slides"] as? [[String:Any]] ?? []}
     var nodes:[[String:Any]] {slides.indices.contains(selectedSlide) ? slides[selectedSlide]["nodes"] as? [[String:Any]] ?? [] : []}
+    var routeCandidates:[[String:Any]] {
+        nodes.filter { ($0["kind"] as? String) == "shape" && (($0["curve"] as? [[String:Any]])?.isEmpty == false) }
+    }
+    var targetCandidates:[[String:Any]] {
+        nodes.filter {
+            let kind=$0["kind"] as? String
+            return ["shape","image","movie"].contains(kind) && ($0["id"] as? String) != selectedRouteID
+        }
+    }
+
+    func label(_ node:[String:Any]) -> String {
+        node["name"] as? String ?? "\(node["kind"] as? String ?? "对象") \(node["id"] as? String ?? "")"
+    }
+
+    func selectDefaults() {
+        if !routeCandidates.contains(where: { $0["id"] as? String == selectedRouteID }) {
+            selectedRouteID=routeCandidates.first?["id"] as? String
+        }
+        if !targetCandidates.contains(where: { $0["id"] as? String == selectedTargetID }) {
+            selectedTargetID=targetCandidates.first?["id"] as? String
+        }
+    }
+
+    func setSelectedSlide(_ value:Int) {
+        selectedSlide=value
+        selectDefaults()
+    }
     func run(_ action:@escaping () async throws -> Void) {
         busy=true;error=nil
         Task {do {try await action()} catch {self.error=error.localizedDescription;status="未完成，请查看提示。"};busy=false}
@@ -30,10 +85,71 @@ import UniformTypeIdentifiers
     }
     func load(_ url:URL) {
         run {self.status="正在检查文稿和素材…";let data=try await self.client.request("inspect",arguments:["path":url.path]);self.source=url;self.result=data;self.selectedSlide=0
+            self.selectDefaults()
             let hash=(data["source"] as? [String:Any])?["sha256"] as? String ?? ""
             self.project.source=ProjectSource(relativePath:url.path,sha256:hash)
             self.projectDirty=true;self.playbackSeconds=0
-            self.status="已导入 \(self.slides.count) 页，素材引用检查通过；可保存为 P1 动效项目。"}
+            self.status="已导入 \(self.slides.count) 页，素材引用检查通过；可选择路线和目标对象。"}
+    }
+
+    private func decode<T:Decodable>(_ value:[String:Any], as type:T.Type) throws -> T {
+        let data=try JSONSerialization.data(withJSONObject:value,options:[])
+        return try JSONDecoder().decode(type,from:data)
+    }
+
+    func importRoute() {
+        guard let source,let routeID=selectedRouteID else {
+            error="请先选择一条 Keynote 曲线。";return
+        }
+        let slide=selectedSlide+1
+        run {
+            self.status="正在读取曲线控制点…"
+            var args:[String:Any]=["path":source.path,"slide":slide,"curve":routeID]
+            if let targetID=self.selectedTargetID {args["target"]=targetID}
+            let response=try await self.client.request("extractRoute",arguments:args)
+            let imported=try self.decode(response,as:ImportedRoute.self)
+            var updated=self.project
+            updated.source=imported.source
+            updated.canvas=Vec(x:imported.canvas.x,y:imported.canvas.y)
+            updated.segments=imported.segments
+            updated.slideID=imported.slideID
+            updated.routeObjectID=imported.routeObjectID
+            updated.targetObjectID=imported.target?.id
+            if let target=imported.target,target.size.count==2 {
+                updated.target=ProjectTarget(name:target.name,
+                                             size:Vec(x:target.size[0],y:target.size[1]),
+                                             anchor:Vec(x:0.5,y:0.5))
+            }
+            updated.spans=[TimeSpan(start:0,duration:max(0.1,self.applyDuration),from:0,to:1)]
+            self.project=updated
+            self.projectDirty=true
+            self.playbackSeconds=0
+            self.status="已导入 \(imported.segments.count) 段曲线；可预览或写回 Keynote 动画。"
+        }
+    }
+
+    func applyMotion() {
+        guard let source,let routeID=selectedRouteID,let targetID=selectedTargetID else {
+            error="请先选择路线和目标对象。";return
+        }
+        guard routeID != targetID else {error="路线和目标对象必须不同。";return}
+        let panel=NSSavePanel()
+        panel.allowedContentTypes=[UTType(filenameExtension:"key")!]
+        panel.nameFieldStringValue=source.deletingPathExtension().lastPathComponent+"_P2沿线动画.key"
+        guard panel.runModal() == .OK,let output=panel.url else {return}
+        let hash=(result?["source"] as? [String:Any])?["sha256"] as? String ?? ""
+        let slide=selectedSlide+1
+        run {
+            self.status="正在把路线写回 Keynote 副本…"
+            let response=try await self.client.request("applyMotion",arguments:[
+                "source":source.path,"output":output.path,"sha256":hash,
+                "slide":slide,"curve":routeID,"target":targetID,
+                "duration":self.applyDuration,"draw":self.applyDraw,
+                "align":self.applyAlign
+            ])
+            self.status="已生成并校验副本：\(response["path"] as? String ?? output.path)"
+            NSWorkspace.shared.activateFileViewerSelecting([output])
+        }
     }
     func selfCheck() {
         run {
@@ -54,7 +170,7 @@ import UniformTypeIdentifiers
     }
     func newProject() {
         stopPlayback();project=MotionProject.sample(sourcePath:source?.path ?? "",sha256:(result?["source"] as? [String:Any])?["sha256"] as? String ?? "")
-        projectURL=nil;projectDirty=true;playbackSeconds=0;status="已建立新的 P1 动效项目。"
+        projectURL=nil;projectDirty=true;playbackSeconds=0;status="已建立新的 P1 动效项目。";selectDefaults()
     }
     func openProject() {
         let panel=NSOpenPanel();panel.allowedContentTypes=[.json];panel.canChooseDirectories=false
@@ -121,14 +237,20 @@ struct NodeRow:View {
 }
 struct WorkshopView:View {
     @StateObject var model=Workshop()
+    private var routeSelection:Binding<String> {
+        Binding(get:{model.selectedRouteID ?? ""},set:{model.selectedRouteID=$0.isEmpty ? nil : $0})
+    }
+    private var targetSelection:Binding<String> {
+        Binding(get:{model.selectedTargetID ?? ""},set:{model.selectedTargetID=$0.isEmpty ? nil : $0})
+    }
     var body:some View {
         NavigationSplitView {
             VStack(alignment:.leading,spacing:18) {
                 Text("动效工坊").font(.title2.bold())
-                Text("P0 已验证 · P1 预览中").font(.subheadline).foregroundStyle(.secondary)
+                Text("P0 已验证 · P1 预览 · P2 路线导入").font(.subheadline).foregroundStyle(.secondary)
                 Divider()
                 if model.slides.isEmpty {Text("尚未导入文稿").foregroundStyle(.secondary)}
-                List(model.slides.indices,id:\.self,selection:$model.selectedSlide) {i in
+                List(model.slides.indices,id:\.self,selection:Binding(get:{model.selectedSlide},set:{model.setSelectedSlide($0)})) {i in
                     Label("幻灯片 \(i+1)",systemImage:"rectangle.on.rectangle").tag(i)
                 }.listStyle(.sidebar)
                 Text("现有沿线工具 1.1 仍可独立使用。新功能将在后续阶段逐项开放。")
@@ -161,6 +283,38 @@ struct WorkshopView:View {
                         }
                     }.frame(maxWidth:.infinity)
                     VStack(alignment:.leading,spacing:16) {
+                        GroupBox("P2 路线导入与写回") {
+                            VStack(alignment:.leading,spacing:10) {
+                                Picker("路线",selection:routeSelection) {
+                                    Text("未选择").tag("")
+                                    ForEach(model.routeCandidates.indices,id:\.self) { index in
+                                        let node=model.routeCandidates[index]
+                                        Text(model.label(node)).tag(node["id"] as? String ?? "")
+                                    }
+                                }
+                                Picker("目标",selection:targetSelection) {
+                                    Text("未选择").tag("")
+                                    ForEach(model.targetCandidates.indices,id:\.self) { index in
+                                        let node=model.targetCandidates[index]
+                                        Text(model.label(node)).tag(node["id"] as? String ?? "")
+                                    }
+                                }
+                                HStack {
+                                    Text("时长")
+                                    TextField("秒",value:$model.applyDuration,format:.number.precision(.fractionLength(1)))
+                                        .frame(width:58)
+                                    Text("秒")
+                                    Toggle("同步绘制",isOn:$model.applyDraw)
+                                }
+                                Toggle("沿路线切线旋转",isOn:$model.applyAlign)
+                                HStack {
+                                    Button("导入曲线",systemImage:"point.topleft.down.curvedto.point.bottomright.up") {model.importRoute()}
+                                    Button("写回副本",systemImage:"arrow.down.doc") {model.applyMotion()}
+                                }
+                                Text("只处理当前幻灯片的根级路线和目标对象；副本不会覆盖原文稿。")
+                                    .font(.caption).foregroundStyle(.secondary)
+                            }.padding(10).frame(maxWidth:.infinity,alignment:.leading)
+                        }
                         GroupBox("三项专项样例") {
                             VStack(alignment:.leading,spacing:14) {
                                 Button("1. 非中心贴线与转向") {model.openFixture("01_anchor.key")}

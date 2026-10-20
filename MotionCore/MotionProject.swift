@@ -29,6 +29,11 @@ struct MotionProject: Codable, Sendable {
     var formatVersion: Int
     var projectID: String
     var source: ProjectSource
+    /// Stable object ids from the imported Keynote scene. Optional keeps P1
+    /// project files readable when they were created before P2 route import.
+    var slideID: String?
+    var routeObjectID: String?
+    var targetObjectID: String?
     var canvas: Vec
     var segments: [Cubic]
     var target: ProjectTarget
@@ -81,6 +86,9 @@ struct MotionProject: Codable, Sendable {
             formatVersion: 1,
             projectID: UUID().uuidString,
             source: ProjectSource(relativePath: sourcePath, sha256: normalizedHash),
+            slideID: nil,
+            routeObjectID: nil,
+            targetObjectID: nil,
             canvas: Vec(x: 1920, y: 1080),
             segments: [
                 Cubic(p0: Vec(x: 150, y: 760), p1: Vec(x: 350, y: 450), p2: Vec(x: 520, y: 820), p3: Vec(x: 760, y: 570)),

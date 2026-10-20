@@ -9,6 +9,9 @@
     "formatVersion": {"const": 1},
     "projectID": {"type": "string", "minLength": 1},
     "source": {"$ref": "#/$defs/source"},
+    "slideID": {"type": ["string", "null"]},
+    "routeObjectID": {"type": ["string", "null"]},
+    "targetObjectID": {"type": ["string", "null"]},
     "canvas": {"$ref": "#/$defs/vec"},
     "segments": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/cubic"}},
     "target": {

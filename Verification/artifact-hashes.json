@@ -28,15 +28,15 @@
     "sha256": "2373158a3a6e7e2710b585bcd1b424b0b827243881886f56f62b8bab0751f41d"
   },
   "ProjectFormat/project-v1.schema.json": {
-    "bytes": 2739,
-    "sha256": "a6f7564fca1d34327aa1e5e76358394e05f7567aa140a70f0f8f0b646cfc749e"
+    "bytes": 2887,
+    "sha256": "b926262ffcc105918bf3c7e9c7195846bf3be28160d812ae4e7772828f0cb99f"
   },
   "ProjectFormat/example-project.kmotion.json": {
-    "bytes": 1451,
-    "sha256": "981e3d42ddd975b2d2c2d3238782e77eaa94bab0f4cf8f024166db66d3067c8e"
+    "bytes": 1521,
+    "sha256": "feb70c62d35f5792de12ba619c46ebac0e6ff699d0d73962c211897f0084bb17"
   },
-  "dist/Keynote动效工坊-P1.zip": {
-    "bytes": 22960063,
-    "sha256": "e5de6258a8a6731a7ad590f9ba45a257a05838cb6bfb9aaba8c74e9c77fee575"
+  "dist/Keynote动效工坊-P2.zip": {
+    "bytes": 23121047,
+    "sha256": "31a0f1fe84261e81e7e3e411f58e63b5213f1cf0a4de43e23e85b3c110484cc0"
   }
 }

@@ -5,6 +5,9 @@
     "relativePath": "示例/我的演示.key",
     "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
   },
+  "slideID": null,
+  "routeObjectID": null,
+  "targetObjectID": null,
   "canvas": {
     "x": 1920,
     "y": 1080
