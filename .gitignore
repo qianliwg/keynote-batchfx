@@ -5,3 +5,7 @@ __pycache__/
 *.pyc
 .DS_Store
 Verification/private/
+
+# Local document/video verification assets; never publish by default.
+Fixtures/
+Verification/native/

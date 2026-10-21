@@ -79,11 +79,13 @@ struct Timeline: Codable,Sendable {
     var spans:[TimeSpan]
     var duration:Double { spans.last.map{$0.start+$0.duration} ?? 0 }
     init(spans:[TimeSpan]) throws {
-        var end=0.0,progress=0.0
-        for s in spans {
+        var end=0.0,progress:Double?
+        for (index,s) in spans.enumerated() {
             guard s.start.isFinite,s.duration.isFinite,s.from.isFinite,s.to.isFinite,
-                  s.duration>0,abs(s.start-end)<1e-8,abs(s.from-progress)<1e-8,
-                  (0...1).contains(s.to) else { throw MotionError.invalidTimeline }
+                  s.duration>0,abs(s.start-end)<1e-8,
+                  (0...1).contains(s.from),(0...1).contains(s.to),
+                  index == 0 ? progress == nil : abs(s.from-(progress ?? s.from)) < 1e-8
+                  else { throw MotionError.invalidTimeline }
             end=s.start+s.duration;progress=s.to
         }
         guard !spans.isEmpty else {throw MotionError.invalidTimeline}
@@ -95,7 +97,10 @@ struct Timeline: Codable,Sendable {
         return s.from+(s.to-s.from)*min(1,max(0,(t-s.start)/s.duration))
     }
 }
-enum MotionError:Error {case invalidTimeline}
+enum MotionError: LocalizedError {
+    case invalidTimeline
+    var errorDescription: String? { "时间线必须连续、时长为正，进度需在 0 到 1 之间。" }
+}
 
 struct MotionChecks {
     static func run() throws -> [String] {

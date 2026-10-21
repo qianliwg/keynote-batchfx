@@ -10,6 +10,7 @@ struct ProjectTarget: Codable, Equatable, Sendable {
     var size: Vec
     /// Normalized point inside the target. (0,0) is the top-left corner.
     var anchor: Vec
+    var rotationDegrees: Double? = nil
 }
 
 enum ProjectOrientation: String, Codable, CaseIterable, Sendable {
@@ -52,10 +53,49 @@ struct MotionProject: Codable, Sendable {
     func timeline() -> Timeline? { try? Timeline(spans: spans) }
 
     func pose(at seconds: Double) -> Pose {
-        guard timeline() != nil else {
-            return route.pose(progress: 0, anchorOffset: anchorOffset)
+        let sampled = route.pose(progress: progress(at: seconds))
+        let angle = orientation == .fixed ? (target.rotationDegrees ?? 0) * .pi / 180 : sampled.angle
+        return Pose(route: sampled.route, center: sampled.route - anchorOffset.rotated(angle), angle: angle)
+    }
+
+    var previewDuration: Double { duration * (playback == .pingPong ? 2 : 1) }
+
+    /// Display a bounded playhead while the monotonic playback clock continues.
+    func playhead(at elapsed: Double) -> Double {
+        playback == .once ? min(duration, max(0, elapsed)) : max(0, elapsed).truncatingRemainder(dividingBy: max(0.001, previewDuration))
+    }
+
+    var nativeExportIssue: String? {
+        guard slideID != nil, routeObjectID != nil, targetObjectID != nil else { return "先从文稿中选择路线和目标，点击“导入到预览”。" }
+        guard spans.count == 1, spans[0].start == 0, spans[0].from == 0, spans[0].to == 1 else { return "停靠与分段速度当前仅支持预览，暂不能生成副本。" }
+        guard (0.1...600).contains(duration) else { return "导出时长需要在 0.1 至 600 秒之间。" }
+        guard playback == .once else { return "循环与往返当前用于预览；生成副本前请切换为单次。" }
+        if orientation == .routeTangent && (abs(target.anchor.x - 0.5) > 1e-8 || abs(target.anchor.y - 0.5) > 1e-8) {
+            return "非中心贴线点导出支持固定朝向；沿线转向的支点仍在验证。"
         }
-        return route.pose(progress: progress(at: seconds), anchorOffset: anchorOffset)
+        return nil
+    }
+
+    func validated() throws -> MotionProject {
+        func finite(_ p: Vec) -> Bool { p.x.isFinite && p.y.isFinite }
+        guard formatVersion == 1 else { throw ProjectError.invalid("不支持此项目版本。") }
+        guard finite(canvas), canvas.x > 0, canvas.y > 0, max(canvas.x, canvas.y) <= 100000,
+              finite(target.size), min(target.size.x, target.size.y) > 0,
+              finite(target.anchor), (0...1).contains(target.anchor.x), (0...1).contains(target.anchor.y),
+              (target.rotationDegrees ?? 0).isFinite, [30, 60].contains(fps),
+              !segments.isEmpty, segments.count <= 10000 else { throw ProjectError.invalid("项目的画布、对象尺寸或贴线位置无效。") }
+        for (index, segment) in segments.enumerated() {
+            guard [segment.p0, segment.p1, segment.p2, segment.p3].allSatisfy({ finite($0) && abs($0.x) <= 1e7 && abs($0.y) <= 1e7 }),
+                  index == 0 || (segments[index-1].p3 - segment.p0).length < 1e-5 else {
+                throw ProjectError.invalid("项目路线无效或不连续。")
+            }
+        }
+        _ = try Timeline(spans: spans)
+        guard duration.isFinite, duration <= 86400, route.length > 1e-6,
+              source.sha256.range(of: "^[a-f0-9]{64}$", options: .regularExpression) != nil else {
+            throw ProjectError.invalid("项目时长、来源指纹或路线长度无效。")
+        }
+        return self
     }
 
     func progress(at seconds: Double) -> Double {
@@ -108,4 +148,9 @@ struct MotionProject: Codable, Sendable {
             fps: 30
         )
     }
+}
+
+enum ProjectError: LocalizedError {
+    case invalid(String)
+    var errorDescription: String? { if case .invalid(let message) = self { return message }; return nil }
 }

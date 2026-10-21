@@ -7,6 +7,11 @@ from iwa_codec import xy
 
 PROTOCOL=1
 
+# `-I` is used for the bundled runtime, so CPython does not add the
+# executable script's directory to `sys.path`. Keep imports relocatable.
+ADAPTER_ROOT = Path(__file__).resolve().parent
+sys.path.insert(0, str(ADAPTER_ROOT))
+
 def fingerprint(path):
     path=Path(path).resolve(); digest=hashlib.sha256()
     files=sorted(p for p in path.rglob('*') if p.is_file()) if path.is_dir() else [path]
@@ -82,8 +87,11 @@ def _cubic_segments(nodes):
     ]
 
 
-def extract_route(path, slide, curve, target=None):
+def extract_route(path, slide, curve, target=None, expected=None):
     """Return a portable route recipe from a selected Keynote curve."""
+    before=fingerprint(path)
+    if expected is not None and before!=expected:
+        raise ValueError("来源已变化，请重新导入文稿。")
     document=SceneDocument(path)
     document.validate_media()
     slide_id,slide_number=_slide_id(document,slide)
@@ -114,25 +122,27 @@ def extract_route(path, slide, curve, target=None):
         },
         'segments':_cubic_segments(nodes),
         'target':None,
-        'source':{'path':str(document.path),'sha256':fingerprint(document.path)}
+        'source':{'relativePath':str(document.path),'sha256':before}
     }
     if target is not None and str(target)!='':
         target_id=_int_argument(target,'目标对象')
-        candidates={item['id']:item for item in document.items(slide_id)}
+        candidates={int(item['id']):item for item in document.scene(slide_id)['nodes'] if item['kind'] in ('shape','image','movie','group')}
         target_item=candidates.get(target_id)
         if target_item is None:
-            raise ValueError('目标对象必须是所选幻灯片上的图片、GIF、影片或形状。')
+            raise ValueError('目标对象必须是所选幻灯片上的图片、GIF、影片、形状或群组。')
         if target_id==curve_id:
             raise ValueError('路线和目标对象必须是两个不同对象。')
         result['target']={
             'id':str(target_id),
-            'name':target_item['label'],
-            'kind':{SHAPE:'shape',IMAGE:'image',MOVIE:'movie'}.get(target_item['type'],'unsupported'),
+            'name':target_item['name'],
+            'kind':target_item['kind'],
             'position':list(target_item['position']),
             'size':list(target_item['size']),
-            'rotationDegrees':-target_item['angle']
+            'rotationDegrees':target_item['rotationDegrees']
         }
         result['targetObjectID']=str(target_id)
+    if fingerprint(path)!=before:
+        raise ValueError('读取期间来源发生变化，请保存后重新导入。')
     return result
 
 def inspect(path):
@@ -142,7 +152,7 @@ def inspect(path):
             'media':[{'path':n,'bytes':len(b),'sha256':hashlib.sha256(b).hexdigest()} for n,b in d.entries.items() if n.startswith('Data/')],
             'capabilities':{'inspectGroups':True,'centerMotion':'legacy','anchorTurning':'experimental',
                             'segmentedTiming':'experimental','groupMotion':'experimental',
-                            'extractRoute':True,'applyMotion':'rootObjectsOnly'}}
+                            'extractRoute':True,'applyMotion':'rootObjectsOnly','exportProject':'rootGroupsAndFixedAnchors'}}
     if fingerprint(path)!=before:raise ValueError('读取期间来源发生变化，请保存后重新导入。')
     return result
 
@@ -179,12 +189,14 @@ def apply_motion(source,output,expected,slide,curve,target,duration=8.0,draw=Tru
     if curve_id==target_id:
         raise ValueError('路线和目标对象必须是两个不同对象。')
     nodes=document.curve_nodes(curve_id)
-    result=generate(source,slide_id,curve_id,target_id,output=output,duration=duration,
-                    draw=bool(draw),align=bool(align),heading=heading)
-    if fingerprint(source)!=expected:
-        if output.exists(): output.unlink()
-        raise ValueError('生成期间来源发生变化，已取消输出。')
-    check=SceneDocument(output);check.validate_media()
+    with tempfile.TemporaryDirectory(prefix='.kmotion-',dir=output.parent) as temp:
+        staged=Path(temp)/'candidate.key'
+        result=generate(source,slide_id,curve_id,target_id,output=staged,duration=duration,
+                        draw=bool(draw),align=bool(align),heading=heading)
+        check=SceneDocument(staged);check.validate_media()
+        if fingerprint(source)!=expected:
+            raise ValueError('生成期间来源发生变化，已取消输出。')
+        os.link(staged,output)
     return {'path':str(output),'verified':True,'slide':slide_number,
             'routeObjectID':str(curve_id),'targetObjectID':str(target_id),
             'nodes':len(nodes),'duration':float(duration),'draw':bool(draw),
@@ -196,11 +208,14 @@ def dispatch(request):
     if op=='health':
         import zlib,struct,math,datetime,zoneinfo,secrets,zipfile
         return {'python':sys.version.split()[0],'runtimePrefix':sys.prefix,'isolated':bool(sys.flags.isolated),
-                'protocol':PROTOCOL,'adapter':'0.2.0-p2','status':'ok'}
+                'protocol':PROTOCOL,'adapter':'0.3.2-p2.2','status':'ok'}
     if op=='inspect':return inspect(args['path'])
     if op=='validatedCopy':return validated_copy(args['source'],args['output'],args['sha256'])
     if op=='extractRoute':
-        return extract_route(args['path'],args.get('slide',1),args['curve'],args.get('target'))
+        return extract_route(args['path'],args.get('slide',1),args['curve'],args.get('target'),args.get('sha256'))
+    if op=='exportProject':
+        from motion_export import export_project
+        return export_project(args['source'],args['output'],args['project'],args.get('replaceExisting',False))
     if op=='applyMotion':
         return apply_motion(args['source'],args['output'],args['sha256'],args.get('slide',1),
                             args['curve'],args['target'],args.get('duration',8.0),

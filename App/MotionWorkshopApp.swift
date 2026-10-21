@@ -2,29 +2,6 @@ import SwiftUI
 import AppKit
 import UniformTypeIdentifiers
 
-private struct ImportedCanvas: Decodable {
-    var x: Double
-    var y: Double
-}
-
-private struct ImportedTarget: Decodable {
-    var id: String
-    var name: String
-    var kind: String
-    var size: [Double]
-}
-
-private struct ImportedRoute: Decodable {
-    var sceneVersion: Int
-    var slide: Int
-    var slideID: String
-    var routeObjectID: String
-    var segments: [Cubic]
-    var target: ImportedTarget?
-    var canvas: ImportedCanvas
-    var source: ProjectSource
-}
-
 @MainActor final class Workshop:ObservableObject {
     @Published var status="打开已保存的 Keynote 文稿，检查页面、对象与素材。"
     @Published var busy=false
@@ -41,9 +18,9 @@ private struct ImportedRoute: Decodable {
     @Published var selectedRouteID:String?
     @Published var selectedTargetID:String?
     @Published var applyDuration=8.0
-    @Published var applyDraw=true
-    @Published var applyAlign=true
+    @Published var replaceExisting=false
     private var playbackTimer:Timer?
+    private var playbackOrigin:Double=0
     var resources:URL {Bundle.main.resourceURL!}
     var client:AdapterClient {AdapterClient(resources:resources)}
     var slides:[[String:Any]] {result?["slides"] as? [[String:Any]] ?? []}
@@ -54,7 +31,7 @@ private struct ImportedRoute: Decodable {
     var targetCandidates:[[String:Any]] {
         nodes.filter {
             let kind=$0["kind"] as? String
-            return ["shape","image","movie"].contains(kind) && ($0["id"] as? String) != selectedRouteID
+            return ["shape","image","movie","group"].contains(kind) && ($0["id"] as? String) != selectedRouteID
         }
     }
 
@@ -67,8 +44,13 @@ private struct ImportedRoute: Decodable {
             selectedRouteID=routeCandidates.first?["id"] as? String
         }
         if !targetCandidates.contains(where: { $0["id"] as? String == selectedTargetID }) {
-            selectedTargetID=targetCandidates.first?["id"] as? String
+            selectedTargetID=(targetCandidates.first(where:{$0["curve"] == nil}) ?? targetCandidates.first)?["id"] as? String
         }
+    }
+
+    func setSelectedRoute(_ value:String) {
+        selectedRouteID=value.isEmpty ? nil : value
+        selectDefaults()
     }
 
     func setSelectedSlide(_ value:Int) {
@@ -76,6 +58,7 @@ private struct ImportedRoute: Decodable {
         selectDefaults()
     }
     func run(_ action:@escaping () async throws -> Void) {
+        guard !busy else {return}
         busy=true;error=nil
         Task {do {try await action()} catch {self.error=error.localizedDescription;status="未完成，请查看提示。"};busy=false}
     }
@@ -84,12 +67,23 @@ private struct ImportedRoute: Decodable {
         if panel.runModal() == .OK,let url=panel.url {load(url)}
     }
     func load(_ url:URL) {
-        run {self.status="正在检查文稿和素材…";let data=try await self.client.request("inspect",arguments:["path":url.path]);self.source=url;self.result=data;self.selectedSlide=0
-            self.selectDefaults()
-            let hash=(data["source"] as? [String:Any])?["sha256"] as? String ?? ""
-            self.project.source=ProjectSource(relativePath:url.path,sha256:hash)
-            self.projectDirty=true;self.playbackSeconds=0
-            self.status="已导入 \(self.slides.count) 页，素材引用检查通过；可选择路线和目标对象。"}
+        run {
+            self.status="正在检查文稿和素材…"
+            let data=try await self.client.request("inspect",arguments:["path":url.path])
+            self.source=url;self.result=data;self.selectedSlide=0
+            self.selectedRouteID=nil;self.selectedTargetID=nil;self.selectDefaults()
+            self.status="已读取文稿；选好路线和目标后导入到预览。"
+        }
+    }
+
+    var canExport:Bool { !busy && source != nil && project.nativeExportIssue == nil && project.source.relativePath == source?.path }
+
+    private func confirmDiscard() -> Bool {
+        guard projectDirty else {return true}
+        let alert=NSAlert();alert.messageText="当前项目有未保存的设置"
+        alert.informativeText="继续会替换当前预览。可先取消并保存项目。"
+        alert.addButton(withTitle:"继续替换");alert.addButton(withTitle:"取消")
+        return alert.runModal() == .alertFirstButtonReturn
     }
 
     private func decode<T:Decodable>(_ value:[String:Any], as type:T.Type) throws -> T {
@@ -98,56 +92,47 @@ private struct ImportedRoute: Decodable {
     }
 
     func importRoute() {
-        guard let source,let routeID=selectedRouteID else {
-            error="请先选择一条 Keynote 曲线。";return
+        guard let source,let routeID=selectedRouteID,let targetID=selectedTargetID,
+              let hash=(result?["source"] as? [String:Any])?["sha256"] as? String else {
+            error="请先选择路线和目标对象。";return
         }
-        let slide=selectedSlide+1
+        guard applyDuration.isFinite,(0.1...600).contains(applyDuration) else {error="时长需要在 0.1 至 600 秒之间。";return}
+        guard confirmDiscard() else {return}
+        let slide=selectedSlide+1, duration=applyDuration
         run {
-            self.status="正在读取曲线控制点…"
-            var args:[String:Any]=["path":source.path,"slide":slide,"curve":routeID]
-            if let targetID=self.selectedTargetID {args["target"]=targetID}
-            let response=try await self.client.request("extractRoute",arguments:args)
+            self.stopPlayback();self.status="正在读取曲线控制点…"
+            let response=try await self.client.request("extractRoute",arguments:[
+                "path":source.path,"slide":slide,"curve":routeID,"target":targetID,"sha256":hash])
             let imported=try self.decode(response,as:ImportedRoute.self)
-            var updated=self.project
+            guard let target=imported.target,target.size.count==2 else {throw AdapterFailure(message:"未读取到目标对象尺寸。")}
+            var updated=MotionProject.sample()
             updated.source=imported.source
             updated.canvas=Vec(x:imported.canvas.x,y:imported.canvas.y)
             updated.segments=imported.segments
-            updated.slideID=imported.slideID
-            updated.routeObjectID=imported.routeObjectID
-            updated.targetObjectID=imported.target?.id
-            if let target=imported.target,target.size.count==2 {
-                updated.target=ProjectTarget(name:target.name,
-                                             size:Vec(x:target.size[0],y:target.size[1]),
-                                             anchor:Vec(x:0.5,y:0.5))
-            }
-            updated.spans=[TimeSpan(start:0,duration:max(0.1,self.applyDuration),from:0,to:1)]
-            self.project=updated
-            self.projectDirty=true
-            self.playbackSeconds=0
-            self.status="已导入 \(imported.segments.count) 段曲线；可预览或写回 Keynote 动画。"
+            updated.slideID=imported.slideID;updated.routeObjectID=imported.routeObjectID;updated.targetObjectID=target.id
+            updated.target=ProjectTarget(name:target.name,size:Vec(x:target.size[0],y:target.size[1]),
+                                         anchor:Vec(x:0.5,y:0.5),rotationDegrees:target.rotationDegrees)
+            updated.orientation = .fixed
+            updated.spans=[TimeSpan(start:0,duration:duration,from:0,to:1)]
+            self.project=try updated.validated();self.projectURL=nil;self.replaceExisting=false
+            self.projectDirty=true;self.playbackSeconds=0
+            self.status="已导入路线和目标。预览页的贴线点、朝向、描线和时长将用于生成副本。"
         }
     }
 
     func applyMotion() {
-        guard let source,let routeID=selectedRouteID,let targetID=selectedTargetID else {
-            error="请先选择路线和目标对象。";return
-        }
-        guard routeID != targetID else {error="路线和目标对象必须不同。";return}
-        let panel=NSSavePanel()
-        panel.allowedContentTypes=[UTType(filenameExtension:"key")!]
-        panel.nameFieldStringValue=source.deletingPathExtension().lastPathComponent+"_P2沿线动画.key"
+        guard let source,canExport else {error=project.nativeExportIssue ?? "请重新关联项目来源文稿。";return}
+        let panel=NSSavePanel();panel.allowedContentTypes=[UTType(filenameExtension:"key")!]
+        panel.nameFieldStringValue=source.deletingPathExtension().lastPathComponent+"_沿线动画.key"
         guard panel.runModal() == .OK,let output=panel.url else {return}
-        let hash=(result?["source"] as? [String:Any])?["sha256"] as? String ?? ""
-        let slide=selectedSlide+1
+        let recipe=project,replace=replaceExisting
         run {
-            self.status="正在把路线写回 Keynote 副本…"
-            let response=try await self.client.request("applyMotion",arguments:[
-                "source":source.path,"output":output.path,"sha256":hash,
-                "slide":slide,"curve":routeID,"target":targetID,
-                "duration":self.applyDuration,"draw":self.applyDraw,
-                "align":self.applyAlign
-            ])
-            self.status="已生成并校验副本：\(response["path"] as? String ?? output.path)"
+            let data=try JSONEncoder().encode(recipe.validated())
+            let payload=try JSONSerialization.jsonObject(with:data)
+            self.status="正在生成并校验 Keynote 副本…"
+            let response=try await self.client.request("exportProject",arguments:[
+                "source":source.path,"output":output.path,"project":payload,"replaceExisting":replace])
+            self.status="已生成副本（包结构与素材校验通过）：\(response["path"] as? String ?? output.path)；请在 Keynote 中播放检查。"
             NSWorkspace.shared.activateFileViewerSelecting([output])
         }
     }
@@ -169,14 +154,47 @@ private struct ImportedRoute: Decodable {
         }
     }
     func newProject() {
-        stopPlayback();project=MotionProject.sample(sourcePath:source?.path ?? "",sha256:(result?["source"] as? [String:Any])?["sha256"] as? String ?? "")
-        projectURL=nil;projectDirty=true;playbackSeconds=0;status="已建立新的 P1 动效项目。";selectDefaults()
+        guard confirmDiscard() else {return}
+        stopPlayback();project=MotionProject.sample();projectURL=nil;projectDirty=false
+        playbackSeconds=0;replaceExisting=false;status="已打开示意项目；导入文稿路线后可生成副本。"
     }
     func openProject() {
+        guard confirmDiscard() else {return}
         let panel=NSOpenPanel();panel.allowedContentTypes=[.json];panel.canChooseDirectories=false
-        if panel.runModal() == .OK,let url=panel.url {
-            do {project=try JSONDecoder().decode(MotionProject.self,from:Data(contentsOf:url));projectURL=url;projectDirty=false;playbackSeconds=0;status="已打开项目设置：\(url.lastPathComponent)"}
-            catch let failure {self.error="项目文件无法打开：\(failure.localizedDescription)"}
+        guard panel.runModal() == .OK,let url=panel.url else {return}
+        do {
+            var loaded=try JSONDecoder().decode(MotionProject.self,from:Data(contentsOf:url)).validated()
+            let path=loaded.source.relativePath
+            let sourceURL=path.hasPrefix("/") ? URL(fileURLWithPath:path) : url.deletingLastPathComponent().appendingPathComponent(path).standardizedFileURL
+            loaded.source.relativePath=sourceURL.path
+            stopPlayback();project=loaded;projectURL=url;projectDirty=false;playbackSeconds=0;replaceExisting=false
+            source=nil;result=nil;selectedSlide=0;selectedRouteID=nil;selectedTargetID=nil
+            status="项目已打开，正在检查来源…"
+            if FileManager.default.fileExists(atPath:sourceURL.path),loaded.slideID != nil {restoreSource(sourceURL)}
+            else {status="项目预览已恢复。来源文稿未找到，使用“重新关联来源”选择原文稿。"}
+        } catch {self.error="项目无法打开："+error.localizedDescription}
+    }
+    func relinkSource() {
+        let panel=NSOpenPanel();panel.allowedContentTypes=[UTType(filenameExtension:"key")!]
+        if panel.runModal() == .OK,let url=panel.url {restoreSource(url)}
+    }
+    private func restoreSource(_ url:URL) {
+        let expected=project.source.sha256,sid=project.slideID,rid=project.routeObjectID,tid=project.targetObjectID
+        run {
+            let data=try await self.client.request("inspect",arguments:["path":url.path])
+            guard (data["source"] as? [String:Any])?["sha256"] as? String == expected else {
+                throw AdapterFailure(message:"所选文稿内容与保存时不同。项目预览已保留；请打开新文稿并重新导入路线。")
+            }
+            let slides=data["slides"] as? [[String:Any]] ?? []
+            guard let index=slides.firstIndex(where:{$0["id"] as? String == sid}) else {throw AdapterFailure(message:"项目关联的幻灯片不存在。")}
+            let roots=slides[index]["nodes"] as? [[String:Any]] ?? []
+            guard roots.contains(where:{$0["id"] as? String == rid}),roots.contains(where:{$0["id"] as? String == tid}) else {
+                throw AdapterFailure(message:"项目关联的路线或目标已不存在。")
+            }
+            self.source=url;self.result=data;self.selectedSlide=index;self.selectedRouteID=rid;self.selectedTargetID=tid
+            if self.project.source.relativePath != url.path {self.projectDirty=true}
+            self.project.source.relativePath=url.path
+            self.status="已恢复来源、幻灯片、路线和目标；保存的运动设置保持不变。"
         }
     }
     func saveProject() {
@@ -187,25 +205,86 @@ private struct ImportedRoute: Decodable {
         if panel.runModal() == .OK,let url=panel.url {writeProject(to:url)}
     }
     private func writeProject(to url:URL) {
-        do {let encoder=JSONEncoder();encoder.outputFormatting=[.prettyPrinted,.sortedKeys];try encoder.encode(project).write(to:url,options:.atomic);projectURL=url;projectDirty=false;status="已保存项目设置：\(url.lastPathComponent)"}
+        do {let encoder=JSONEncoder();encoder.outputFormatting=[.prettyPrinted,.sortedKeys];try encoder.encode(project.validated()).write(to:url,options:.atomic);projectURL=url;projectDirty=false;status="已保存项目设置：\(url.lastPathComponent)"}
         catch let failure {self.error="项目设置保存失败：\(failure.localizedDescription)"}
     }
-    func setPlayback(_ value:Double) {playbackSeconds=min(project.duration,max(0,value))}
-    func setPlaybackMode(_ mode:PlaybackMode) {project.playback=mode;projectDirty=true;playbackSeconds=0}
+    func setPlayback(_ value:Double) {stopPlayback();playbackSeconds=min(project.previewDuration,max(0,value))}
+    func setPlaybackMode(_ mode:PlaybackMode) {stopPlayback();project.playback=mode;projectDirty=true;playbackSeconds=0}
     func setAnchor(x:Double?,y:Double?) {objectWillChange.send();if let x {project.target.anchor.x=x};if let y {project.target.anchor.y=y};projectDirty=true}
     func setDrawLine(_ value:Bool) {objectWillChange.send();project.drawLine=value;projectDirty=true}
     func setOrientation(_ value:ProjectOrientation) {objectWillChange.send();project.orientation=value;projectDirty=true}
+    func setDuration(_ value:Double) {
+        guard value.isFinite,(0.1...600).contains(value),project.spans.count==1 else {return}
+        stopPlayback();project.spans[0].duration=value;projectDirty=true;playbackSeconds=0
+    }
+    private func normalizedTimeline(_ spans:[TimeSpan]) -> [TimeSpan] {
+        var start=0.0
+        var progress=spans.first?.from ?? 0
+        return spans.enumerated().map { index, span in
+            let from=index == 0 ? min(1,max(0,span.from)) : progress
+            let to=min(1,max(0,span.to))
+            let duration=span.duration
+            let normalized=TimeSpan(start:start,duration:duration,from:from,to:to)
+            start += duration
+            progress=to
+            return normalized
+        }
+    }
+    func replaceTimeline(_ spans:[TimeSpan]) {
+        let normalized=normalizedTimeline(spans)
+        guard normalized.count <= 32 else {error="分段数量最多 32 段。";return}
+        do {
+            let timeline=try Timeline(spans:normalized)
+            guard timeline.duration <= 600 else {error="预览时间线总时长不能超过 600 秒。";return}
+            stopPlayback();project.spans=timeline.spans;projectDirty=true;playbackSeconds=0
+        } catch let failure {self.error="时间线设置无效："+failure.localizedDescription}
+    }
+    func editTimelineSpan(_ index:Int,duration:Double?=nil,to:Double?=nil) {
+        guard project.spans.indices.contains(index) else {return}
+        var spans=project.spans
+        if let duration {spans[index].duration=duration}
+        if let to {spans[index].to=to}
+        replaceTimeline(spans)
+    }
+    func removeTimelineSpan(_ index:Int) {
+        guard project.spans.count > 1,project.spans.indices.contains(index) else {return}
+        var spans=project.spans;spans.remove(at:index);replaceTimeline(spans)
+    }
+    func setTimelinePreset(_ preset:String) {
+        let total=max(0.1,min(600,project.duration))
+        switch preset {
+        case "stops":
+            replaceTimeline([
+                TimeSpan(start:0,duration:total*0.2,from:0,to:0.18),
+                TimeSpan(start:0,duration:total*0.1,from:0.18,to:0.18),
+                TimeSpan(start:0,duration:total*0.5,from:0.18,to:0.82),
+                TimeSpan(start:0,duration:total*0.1,from:0.82,to:0.82),
+                TimeSpan(start:0,duration:total*0.1,from:0.82,to:1)
+            ])
+        case "speed":
+            replaceTimeline([
+                TimeSpan(start:0,duration:total*0.25,from:0,to:0.2),
+                TimeSpan(start:0,duration:total*0.45,from:0.2,to:0.75),
+                TimeSpan(start:0,duration:total*0.3,from:0.75,to:1)
+            ])
+        case "reverse":
+            replaceTimeline([TimeSpan(start:0,duration:total,from:1,to:0)])
+        default:
+            replaceTimeline([TimeSpan(start:0,duration:total,from:0,to:1)])
+        }
+    }
     func togglePlayback() {
         if playing {stopPlayback()} else {startPlayback()}
     }
     private func startPlayback() {
-        guard project.duration>0 else {return};if playbackSeconds>=project.duration {playbackSeconds=0};playing=true
+        guard project.duration>0 else {return};if playbackSeconds>=project.previewDuration {playbackSeconds=0};playing=true
+        playbackOrigin=ProcessInfo.processInfo.systemUptime-playbackSeconds
         playbackTimer?.invalidate();playbackTimer=Timer.scheduledTimer(withTimeInterval:1.0/60.0,repeats:true) {[weak self] _ in
             Task { @MainActor [weak self] in self?.advancePlayback() }
         }
     }
     private func advancePlayback() {
-        playbackSeconds += 1.0/60.0
+        playbackSeconds=ProcessInfo.processInfo.systemUptime-playbackOrigin
         if project.playback == .once && playbackSeconds >= project.duration {playbackSeconds=project.duration;stopPlayback()}
     }
     func stopPlayback() {playbackTimer?.invalidate();playbackTimer=nil;playing=false}
@@ -238,7 +317,7 @@ struct NodeRow:View {
 struct WorkshopView:View {
     @StateObject var model=Workshop()
     private var routeSelection:Binding<String> {
-        Binding(get:{model.selectedRouteID ?? ""},set:{model.selectedRouteID=$0.isEmpty ? nil : $0})
+        Binding(get:{model.selectedRouteID ?? ""},set:{model.setSelectedRoute($0)})
     }
     private var targetSelection:Binding<String> {
         Binding(get:{model.selectedTargetID ?? ""},set:{model.selectedTargetID=$0.isEmpty ? nil : $0})
@@ -247,7 +326,7 @@ struct WorkshopView:View {
         NavigationSplitView {
             VStack(alignment:.leading,spacing:18) {
                 Text("动效工坊").font(.title2.bold())
-                Text("P0 已验证 · P1 预览 · P2 路线导入").font(.subheadline).foregroundStyle(.secondary)
+                Text("P2.3 · 分段时间线与群组移动").font(.subheadline).foregroundStyle(.secondary)
                 Divider()
                 if model.slides.isEmpty {Text("尚未导入文稿").foregroundStyle(.secondary)}
                 List(model.slides.indices,id:\.self,selection:Binding(get:{model.selectedSlide},set:{model.setSelectedSlide($0)})) {i in
@@ -283,7 +362,7 @@ struct WorkshopView:View {
                         }
                     }.frame(maxWidth:.infinity)
                     VStack(alignment:.leading,spacing:16) {
-                        GroupBox("P2 路线导入与写回") {
+                        GroupBox("选择路线与目标") {
                             VStack(alignment:.leading,spacing:10) {
                                 Picker("路线",selection:routeSelection) {
                                     Text("未选择").tag("")
@@ -304,14 +383,11 @@ struct WorkshopView:View {
                                     TextField("秒",value:$model.applyDuration,format:.number.precision(.fractionLength(1)))
                                         .frame(width:58)
                                     Text("秒")
-                                    Toggle("同步绘制",isOn:$model.applyDraw)
                                 }
-                                Toggle("沿路线切线旋转",isOn:$model.applyAlign)
                                 HStack {
-                                    Button("导入曲线",systemImage:"point.topleft.down.curvedto.point.bottomright.up") {model.importRoute()}
-                                    Button("写回副本",systemImage:"arrow.down.doc") {model.applyMotion()}
+                                    Button("导入到预览",systemImage:"point.topleft.down.curvedto.point.bottomright.up") {model.importRoute()}
                                 }
-                                Text("只处理当前幻灯片的根级路线和目标对象；副本不会覆盖原文稿。")
+                                Text("可选择整组移动。导入后请到预览页调整参数并生成副本。")
                                     .font(.caption).foregroundStyle(.secondary)
                             }.padding(10).frame(maxWidth:.infinity,alignment:.leading)
                         }
@@ -335,11 +411,11 @@ struct WorkshopView:View {
                 Divider()
                 Text(model.status).font(.callout).foregroundStyle(.secondary).textSelection(.enabled)
             }.padding(28)
-            .tabItem { Label("P0 文稿验证",systemImage:"checkmark.shield") }
+            .tabItem { Label("文稿与对象",systemImage:"checkmark.shield") }
             P1PreviewView(model:model)
-                .tabItem { Label("P1 动效预览",systemImage:"play.rectangle") }
+                .tabItem { Label("预览与导出",systemImage:"play.rectangle") }
             }
-        }.frame(minWidth:980,minHeight:650)
+        }.disabled(model.busy).frame(minWidth:1080,minHeight:720)
     }
 }
 @main struct MotionWorkshopApp:App {

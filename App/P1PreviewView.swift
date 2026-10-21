@@ -13,8 +13,8 @@ private struct PreviewMap {
 
 private func previewMap(canvas: Vec, size: CGSize) -> PreviewMap {
     let padding: CGFloat = 24
-    let scale = min((size.width - padding * 2) / CGFloat(max(1, canvas.x)),
-                    (size.height - padding * 2) / CGFloat(max(1, canvas.y)))
+    let scale = max(0.001, min((size.width - padding * 2) / CGFloat(max(1, canvas.x)),
+                    (size.height - padding * 2) / CGFloat(max(1, canvas.y))))
     let drawn = CGSize(width: CGFloat(canvas.x) * scale, height: CGFloat(canvas.y) * scale)
     return PreviewMap(scale: scale,
                      origin: CGPoint(x: (size.width - drawn.width) / 2,
@@ -37,9 +37,10 @@ private func bezierPath(_ segments: [Cubic], map: PreviewMap) -> Path {
 private func progressPath(_ project: MotionProject, progress: Double, map: PreviewMap) -> Path {
     var path = Path()
     let count = max(12, Int(ceil(progress * 160)))
+    let route = project.route
     for index in 0...count {
         let fraction = progress * Double(index) / Double(count)
-        let point = map.point(project.route.pose(progress: fraction).route)
+        let point = map.point(route.pose(progress: fraction).route)
         if index == 0 { path.move(to: point) } else { path.addLine(to: point) }
     }
     return path
@@ -85,7 +86,7 @@ private struct MotionCanvas: View {
                 context.drawLayer { layer in
                     let center = map.point(pose.center)
                     layer.translateBy(x: center.x, y: center.y)
-                    if project.orientation == .routeTangent { layer.rotate(by: Angle(radians: pose.angle)) }
+                    layer.rotate(by: Angle(radians: pose.angle))
                     let width = CGFloat(project.target.size.x) * map.scale
                     let height = CGFloat(project.target.size.y) * map.scale
                     let body = Path(roundedRect: CGRect(x: -width / 2, y: -height / 2,
@@ -106,7 +107,7 @@ private struct MotionCanvas: View {
                                                      width: 10, height: 10)), with: .color(.red))
             }
         }
-        .aspectRatio(16 / 9, contentMode: .fit)
+        .aspectRatio(project.canvas.x / max(1, project.canvas.y), contentMode: .fit)
         .background(.black.opacity(0.04), in: RoundedRectangle(cornerRadius: 10))
     }
 }
@@ -121,7 +122,7 @@ struct P1PreviewView: View {
     @ObservedObject var model: Workshop
 
     private var progressBinding: Binding<Double> {
-        Binding(get: { model.playbackSeconds }, set: { model.setPlayback($0) })
+        Binding(get: { model.project.playhead(at: model.playbackSeconds) }, set: { model.setPlayback($0) })
     }
     private var anchorXBinding: Binding<Double> {
         Binding(get: { model.project.target.anchor.x }, set: { model.setAnchor(x: $0, y: nil) })
@@ -135,7 +136,7 @@ struct P1PreviewView: View {
             VStack(alignment: .leading, spacing: 16) {
                 HStack(alignment: .firstTextBaseline) {
                     VStack(alignment: .leading, spacing: 4) {
-                        Text("P1 动效预览").font(.title2.bold())
+                        Text("运动预览与导出").font(.title2.bold())
                         Text(model.projectURL?.lastPathComponent ?? "未保存的动效项目")
                             .font(.caption).foregroundStyle(.secondary)
                     }
@@ -149,14 +150,27 @@ struct P1PreviewView: View {
 
                 MotionCanvas(project: model.project, seconds: model.playbackSeconds)
                     .frame(minHeight: 310)
+                Text("几何示意：橙色块表示目标边框，红点表示贴线点；图片内容与 Keynote 实际渲染需在副本中检查。")
+                    .font(.caption).foregroundStyle(.secondary)
 
                 VStack(spacing: 8) {
                     HStack {
                         Button(model.playing ? "暂停" : "播放", systemImage: model.playing ? "pause.fill" : "play.fill", action: model.togglePlayback)
                             .keyboardShortcut(.space, modifiers: [])
-                        Slider(value: progressBinding, in: 0...max(0.01, model.project.duration))
-                        Text(String(format: "%05.2f / %05.2f 秒", model.playbackSeconds, model.project.duration))
+                        Slider(value: progressBinding, in: 0...max(0.01, model.project.previewDuration))
+                        Text(String(format: "%05.2f / %05.2f 秒", model.project.playhead(at: model.playbackSeconds), model.project.previewDuration))
                             .font(.system(.caption, design: .monospaced)).frame(width: 132, alignment: .trailing)
+                    }
+                    HStack {
+                        Button("起点") { model.setPlayback(0) }
+                        Button("上一帧") { model.setPlayback(model.project.playhead(at:model.playbackSeconds) - 1 / Double(model.project.fps)) }
+                        Button("下一帧") { model.setPlayback(model.project.playhead(at:model.playbackSeconds) + 1 / Double(model.project.fps)) }
+                        if model.project.spans.count == 1 {
+                            Text("时长")
+                            TextField("秒", value: Binding(get:{model.project.duration},set:{model.setDuration($0)}), format:.number)
+                                .frame(width:65)
+                            Text("秒")
+                        }
                     }
                     HStack {
                         Picker("播放模式", selection: Binding(get: { model.project.playback }, set: { model.setPlaybackMode($0) })) {
@@ -170,10 +184,65 @@ struct P1PreviewView: View {
                     }
                 }
 
-                GroupBox("图片贴线位置") {
+                GroupBox("分段时间线") {
                     VStack(alignment: .leading, spacing: 8) {
-                        Text("锚点是图片内部跟随路线的点，0% 为左/上，100% 为右/下。拖动后可保存到项目文件。")
+                        Text("分段会共用路线和对象的时间进度；from/to 相同表示停靠，to 小于 from 表示反向。")
                             .font(.caption).foregroundStyle(.secondary)
+                        HStack {
+                            Button("全程") { model.setTimelinePreset("full") }
+                            Button("两次停靠") { model.setTimelinePreset("stops") }
+                            Button("三段速度") { model.setTimelinePreset("speed") }
+                            Button("反向") { model.setTimelinePreset("reverse") }
+                            Spacer()
+                            Text(String(format: "总时长 %.1f 秒", model.project.duration))
+                                .font(.caption).foregroundStyle(.secondary)
+                        }
+                        ForEach(Array(model.project.spans.enumerated()), id: \.offset) { index, span in
+                            HStack(spacing: 8) {
+                                Text("\(index + 1)").frame(width: 20)
+                                Text(String(format: "%.1f–%.1f", span.from, span.to))
+                                    .font(.system(.caption, design: .monospaced))
+                                    .frame(width: 84, alignment: .leading)
+                                Text("时长")
+                                TextField("秒",
+                                          value: Binding(
+                                            get: { model.project.spans[index].duration },
+                                            set: { model.editTimelineSpan(index, duration: $0) }),
+                                          format: .number.precision(.fractionLength(1)))
+                                    .frame(width: 58)
+                                Text("到")
+                                TextField("进度",
+                                          value: Binding(
+                                            get: { model.project.spans[index].to },
+                                            set: { model.editTimelineSpan(index, to: $0) }),
+                                          format: .number.precision(.fractionLength(2)))
+                                    .frame(width: 58)
+                                if model.project.spans.count > 1 {
+                                    Button("删除", systemImage: "minus.circle") {
+                                        model.removeTimelineSpan(index)
+                                    }.labelStyle(.iconOnly)
+                                }
+                            }
+                        }
+                        if let error = model.error {
+                            Text(error).font(.caption).foregroundStyle(.red)
+                        }
+                        Text("复杂分段目前用于预览和项目保存；生成 Keynote 副本前会明确提示尚未支持的组合。")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                    .padding(4)
+                }
+
+                GroupBox("对象 / 群组贴线位置") {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("锚点以对象或群组边框为准，0% 为左/上，100% 为右/下。")
+                            .font(.caption).foregroundStyle(.secondary)
+                        HStack {
+                            Button("中心") {model.setAnchor(x:0.5,y:0.5)}
+                            Button("左侧中点") {model.setAnchor(x:0,y:0.5)}
+                            Button("右侧中点") {model.setAnchor(x:1,y:0.5)}
+                            Button("底部中点") {model.setAnchor(x:0.5,y:1)}
+                        }
                         HStack {
                             Text("X").frame(width: 18)
                             Slider(value: anchorXBinding, in: 0...1)
@@ -185,6 +254,20 @@ struct P1PreviewView: View {
                             Text(String(format: "%3.0f%%", model.project.target.anchor.y * 100)).frame(width: 48, alignment: .trailing)
                         }
                     }.padding(4)
+                }
+                GroupBox("生成 Keynote 副本") {
+                    VStack(alignment:.leading,spacing:8) {
+                        Text(model.project.target.name).font(.caption)
+                        if let issue=model.project.nativeExportIssue {Text(issue).foregroundStyle(.secondary)}
+                        Toggle("替换所选对象原有动画",isOn:$model.replaceExisting)
+                        Text("仅在副本中替换目标和所选描线路线的动画；其余对象动画保留。").font(.caption).foregroundStyle(.secondary)
+                        HStack {
+                            Button("重新关联来源",action:model.relinkSource)
+                            Button("生成副本",systemImage:"arrow.down.doc",action:model.applyMotion).disabled(!model.canExport)
+                        }
+                        if let error=model.error {Text(error).foregroundStyle(.red).textSelection(.enabled)}
+                        Text(model.status).font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
+                    }.frame(maxWidth:.infinity,alignment:.leading).padding(6)
                 }
             }
             .padding(20)

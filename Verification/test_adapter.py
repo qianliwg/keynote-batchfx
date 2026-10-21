@@ -8,8 +8,8 @@ import unittest
 import zipfile
 
 ROOT = Path(__file__).resolve().parents[1]
-RESOURCES = ROOT / 'dist/Keynote动效工坊 P2.app/Contents/Resources'
-FIXTURES_AVAILABLE = (ROOT / 'Fixtures').is_dir()
+RESOURCES = ROOT / 'dist/Keynote动效工坊 P2.3.app/Contents/Resources'
+FIXTURES_AVAILABLE = all((ROOT / 'Fixtures' / name).is_file() for name in ('01_anchor.key','02_timing.key','03_group.key'))
 
 
 def request(operation, **arguments):
@@ -121,6 +121,30 @@ class BundledAdapterChecks(unittest.TestCase):
             self.assertTrue(output.exists())
             self.assertTrue(request('inspect', path=str(output))['ok'])
         self.assertEqual(source.read_bytes(), before)
+
+    @unittest.skipUnless(FIXTURES_AVAILABLE, '公开源码包不含本地 Keynote 样例')
+    def test_export_project_through_bundled_runtime(self):
+        source = ROOT / 'Fixtures/03_group.key'
+        scene = request('inspect', path=str(source))['result']
+        roots = scene['slides'][0]['nodes']
+        curve = next(n for n in roots if n.get('curve'))
+        target = next(n for n in roots if n['kind'] == 'group')
+        imported = request('extractRoute', path=str(source), slide=1, curve=curve['id'],
+                           target=target['id'], sha256=scene['source']['sha256'])['result']
+        project = dict(formatVersion=1, source=imported['source'], slideID=imported['slideID'],
+                       routeObjectID=curve['id'], targetObjectID=target['id'],
+                       canvas=imported['canvas'], segments=imported['segments'],
+                       target=dict(size=dict(zip(('x','y'),target['size'])),
+                                   anchor=dict(x=1, y=.5), rotationDegrees=0),
+                       spans=[dict(start=0, duration=2, **{'from':0,'to':1})],
+                       drawLine=True, orientation='fixed', playback='once')
+        with tempfile.TemporaryDirectory(prefix='kmotion-bundled-project-', dir='/private/tmp') as temp:
+            output = Path(temp)/'group.key'
+            response = request('exportProject', source=str(source), output=str(output),
+                               project=project, replaceExisting=True)
+            self.assertTrue(response['ok'], response)
+            self.assertTrue(response['result']['groupMotion'])
+            self.assertTrue(request('inspect', path=str(output))['ok'])
 
 
 if __name__ == '__main__':
