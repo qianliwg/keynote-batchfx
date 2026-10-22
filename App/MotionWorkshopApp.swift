@@ -232,13 +232,13 @@ import UniformTypeIdentifiers
             effects.audioBeats.audioPath=url.path
             effects.audioBeats.enabled=true
         }
-        status="已关联声音轨道：(url.lastPathComponent)；可用 BPM 和偏移生成卡点。"
+        status="已关联声音轨道：\(url.lastPathComponent)；可用 BPM 和偏移生成卡点。"
     }
     func setLoopCount(_ value:Int) { updateEffects { $0.loopCount=max(1,min(99,value)) } }
     func addParallaxLayer() {
         updateEffects { effects in
             guard effects.parallax.count < 64 else { return }
-            effects.parallax.append(ParallaxLayer(name:"视差层 (effects.parallax.count + 1)", depth:0.35 + Double(effects.parallax.count % 3) * 0.3,
+            effects.parallax.append(ParallaxLayer(name:"视差层 \(effects.parallax.count + 1)", depth:0.35 + Double(effects.parallax.count % 3) * 0.3,
                                                   size:Vec(x:260,y:120), offset:Vec(x:0,y:0)))
         }
     }
@@ -246,7 +246,7 @@ import UniformTypeIdentifiers
     func addTextCue() {
         updateEffects { effects in
             guard effects.textCues.count < 128 else { return }
-            effects.textCues.append(TextCue(text:"节奏文字 (effects.textCues.count + 1)", start:0, duration:min(2, max(0.1, project.duration)), position:Vec(x:960,y:180)))
+            effects.textCues.append(TextCue(text:"节奏文字 \(effects.textCues.count + 1)", start:0, duration:min(2, max(0.1, project.duration)), position:Vec(x:960,y:180)))
         }
     }
     func removeTextCue() { updateEffects { if !$0.textCues.isEmpty { $0.textCues.removeLast() } } }

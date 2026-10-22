@@ -311,7 +311,7 @@ struct P1PreviewView: View {
                         }
                         HStack {
                             Toggle("分层视差", isOn: Binding(get: { !model.project.effectSettings.parallax.isEmpty }, set: { value in if value { model.addParallaxLayer() } else { model.updateEffects { $0.parallax.removeAll() } } }))
-                            Text("层数 (model.project.effectSettings.parallax.count)")
+                            Text("层数 \(model.project.effectSettings.parallax.count)")
                             Button("增加层") { model.addParallaxLayer() }
                             Button("移除层") { model.removeParallaxLayer() }
                         }
