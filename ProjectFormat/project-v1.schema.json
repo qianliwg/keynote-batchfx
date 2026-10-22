@@ -110,6 +110,9 @@
         30,
         60
       ]
+    },
+    "effects": {
+      "$ref": "#/$defs/effects"
     }
   },
   "$defs": {
@@ -234,6 +237,78 @@
           "minimum": 0,
           "maximum": 1
         }
+      }
+    },
+    "effects": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "camera": { "$ref": "#/$defs/camera" },
+        "parallax": { "type": "array", "items": { "$ref": "#/$defs/parallax" }, "maxItems": 64 },
+        "textCues": { "type": "array", "items": { "$ref": "#/$defs/textCue" }, "maxItems": 128 },
+        "arrayWave": { "$ref": "#/$defs/arrayWave" },
+        "audioBeats": { "$ref": "#/$defs/audioBeats" },
+        "loopCount": { "type": "integer", "minimum": 1, "maximum": 99 }
+      }
+    },
+    "camera": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "startCenter": { "$ref": "#/$defs/vec" },
+        "endCenter": { "$ref": "#/$defs/vec" },
+        "startZoom": { "type": "number", "exclusiveMinimum": 0 },
+        "endZoom": { "type": "number", "exclusiveMinimum": 0 }
+      }
+    },
+    "parallax": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "depth": { "type": "number", "minimum": -4, "maximum": 4 },
+        "size": { "$ref": "#/$defs/positiveVec" },
+        "offset": { "$ref": "#/$defs/vec" }
+      }
+    },
+    "textCue": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "id": { "type": "string" },
+        "text": { "type": "string" },
+        "start": { "type": "number", "minimum": 0 },
+        "duration": { "type": "number", "exclusiveMinimum": 0 },
+        "position": { "$ref": "#/$defs/vec" },
+        "startOpacity": { "type": "number", "minimum": 0, "maximum": 1 },
+        "endOpacity": { "type": "number", "minimum": 0, "maximum": 1 },
+        "startScale": { "type": "number", "exclusiveMinimum": 0 },
+        "endScale": { "type": "number", "exclusiveMinimum": 0 }
+      }
+    },
+    "arrayWave": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "count": { "type": "integer", "minimum": 1, "maximum": 128 },
+        "spacing": { "type": "number" },
+        "amplitude": { "type": "number" },
+        "frequency": { "type": "number" },
+        "phase": { "type": "number" }
+      }
+    },
+    "audioBeats": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "audioPath": { "type": ["string", "null"] },
+        "bpm": { "type": "number", "exclusiveMinimum": 0 },
+        "offset": { "type": "number" },
+        "beatsPerBar": { "type": "integer", "minimum": 1, "maximum": 16 }
       }
     }
   }

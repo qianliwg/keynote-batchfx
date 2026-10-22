@@ -116,6 +116,20 @@ struct MotionChecks {
         guard clock.progress(at:2.5)==0.3,clock.progress(at:7.5)==0.7,clock.progress(at:9)==1 else {throw MotionError.invalidTimeline}
         let (a,b)=c.split(0.4)
         guard (a.p3-b.p0).length<1e-10,(a.p3-c.point(0.4)).length<1e-10 else {throw MotionError.invalidTimeline}
-        return ["1001 个非中心贴线姿态：几何误差 < 0.000001 点","两次停靠、三段速度：共用时间函数通过","曲线拆分：接点连续通过（不等于 Keynote 播放验收）"]
+        var effects=MotionEffects.sample
+        effects.camera.enabled=true
+        effects.camera.startZoom=1
+        effects.camera.endZoom=2
+        effects.arrayWave.enabled=true
+        effects.arrayWave.count=7
+        effects.textCues=[TextCue(text:"节拍",start:0,duration:2)]
+        effects.audioBeats=AudioBeatMap(enabled:true,bpm:120,offset:0,beatsPerBar:4)
+        var advanced=MotionProject.sample()
+        advanced.effects=effects
+        guard advanced.camera(at: advanced.duration).zoom == 2,
+              advanced.arrayPoses(at: 1).count == 7,
+              advanced.visibleTextCues(at: 1).count == 1,
+              advanced.effectSettings.audioBeats.beatTimes(duration: 2).count == 5 else { throw MotionError.invalidTimeline }
+        return ["1001 个非中心贴线姿态：几何误差 < 0.000001 点","两次停靠、三段速度：共用时间函数通过","曲线拆分：接点连续通过（不等于 Keynote 播放验收）","镜头、视差、文字、阵列波浪与节拍模型通过"]
     }
 }

@@ -213,6 +213,53 @@ import UniformTypeIdentifiers
     func setAnchor(x:Double?,y:Double?) {objectWillChange.send();if let x {project.target.anchor.x=x};if let y {project.target.anchor.y=y};projectDirty=true}
     func setDrawLine(_ value:Bool) {objectWillChange.send();project.drawLine=value;projectDirty=true}
     func setOrientation(_ value:ProjectOrientation) {objectWillChange.send();project.orientation=value;projectDirty=true}
+    func updateEffects(_ change:(inout MotionEffects)->Void) {
+        objectWillChange.send()
+        var effects=project.effectSettings
+        change(&effects)
+        project.effects=effects
+        projectDirty=true
+    }
+    func setCameraEnabled(_ value:Bool) { updateEffects { $0.camera.enabled=value } }
+    func setArrayWaveEnabled(_ value:Bool) { updateEffects { $0.arrayWave.enabled=value } }
+    func setAudioBeatsEnabled(_ value:Bool) { updateEffects { $0.audioBeats.enabled=value } }
+    func importAudioTrack() {
+        let panel=NSOpenPanel()
+        panel.allowedContentTypes=[.audio]
+        panel.canChooseDirectories=false
+        guard panel.runModal() == .OK, let url=panel.url else { return }
+        updateEffects { effects in
+            effects.audioBeats.audioPath=url.path
+            effects.audioBeats.enabled=true
+        }
+        status="已关联声音轨道：(url.lastPathComponent)；可用 BPM 和偏移生成卡点。"
+    }
+    func setLoopCount(_ value:Int) { updateEffects { $0.loopCount=max(1,min(99,value)) } }
+    func addParallaxLayer() {
+        updateEffects { effects in
+            guard effects.parallax.count < 64 else { return }
+            effects.parallax.append(ParallaxLayer(name:"视差层 (effects.parallax.count + 1)", depth:0.35 + Double(effects.parallax.count % 3) * 0.3,
+                                                  size:Vec(x:260,y:120), offset:Vec(x:0,y:0)))
+        }
+    }
+    func removeParallaxLayer() { updateEffects { if !$0.parallax.isEmpty { $0.parallax.removeLast() } } }
+    func addTextCue() {
+        updateEffects { effects in
+            guard effects.textCues.count < 128 else { return }
+            effects.textCues.append(TextCue(text:"节奏文字 (effects.textCues.count + 1)", start:0, duration:min(2, max(0.1, project.duration)), position:Vec(x:960,y:180)))
+        }
+    }
+    func removeTextCue() { updateEffects { if !$0.textCues.isEmpty { $0.textCues.removeLast() } } }
+    func setCameraPreset(_ preset:String) {
+        updateEffects { effects in
+            switch preset {
+            case "push": effects.camera=CameraMotion(enabled:true,startCenter:Vec(x:canvasCenter().x,y:canvasCenter().y),endCenter:project.pose(at:project.duration).route,startZoom:1,endZoom:1.7)
+            case "pan": effects.camera=CameraMotion(enabled:true,startCenter:project.pose(at:0).route,endCenter:project.pose(at:project.duration).route,startZoom:1.2,endZoom:1.2)
+            default: effects.camera=CameraMotion()
+            }
+        }
+    }
+    private func canvasCenter() -> Vec { Vec(x:project.canvas.x / 2, y:project.canvas.y / 2) }
     func setDuration(_ value:Double) {
         guard value.isFinite,(0.1...600).contains(value),project.spans.count==1 else {return}
         stopPlayback();project.spans[0].duration=value;projectDirty=true;playbackSeconds=0
@@ -285,7 +332,7 @@ import UniformTypeIdentifiers
     }
     private func advancePlayback() {
         playbackSeconds=ProcessInfo.processInfo.systemUptime-playbackOrigin
-        if project.playback == .once && playbackSeconds >= project.duration {playbackSeconds=project.duration;stopPlayback()}
+        if project.playback == .once && playbackSeconds >= project.previewDuration {playbackSeconds=project.previewDuration;stopPlayback()}
     }
     func stopPlayback() {playbackTimer?.invalidate();playbackTimer=nil;playing=false}
     func openFixture(_ name:String) {
@@ -326,7 +373,7 @@ struct WorkshopView:View {
         NavigationSplitView {
             VStack(alignment:.leading,spacing:18) {
                 Text("动效工坊").font(.title2.bold())
-                Text("P2.3 · 分段时间线与群组移动").font(.subheadline).foregroundStyle(.secondary)
+                Text("P3.0 · 视频动效与沿线动画").font(.subheadline).foregroundStyle(.secondary)
                 Divider()
                 if model.slides.isEmpty {Text("尚未导入文稿").foregroundStyle(.secondary)}
                 List(model.slides.indices,id:\.self,selection:Binding(get:{model.selectedSlide},set:{model.setSelectedSlide($0)})) {i in

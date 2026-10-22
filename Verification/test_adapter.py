@@ -8,7 +8,7 @@ import unittest
 import zipfile
 
 ROOT = Path(__file__).resolve().parents[1]
-RESOURCES = ROOT / 'dist/Keynote动效工坊 P2.3.app/Contents/Resources'
+RESOURCES = ROOT / 'dist/Keynote动效工坊 P3.0.app/Contents/Resources'
 FIXTURES_AVAILABLE = all((ROOT / 'Fixtures' / name).is_file() for name in ('01_anchor.key','02_timing.key','03_group.key'))
 
 

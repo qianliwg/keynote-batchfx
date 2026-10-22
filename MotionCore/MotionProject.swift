@@ -43,6 +43,9 @@ struct MotionProject: Codable, Sendable {
     var drawLine: Bool
     var playback: PlaybackMode
     var fps: Int
+    /// Optional keeps P1/P2 project files readable while allowing the advanced
+    /// preview tools to be saved alongside the original motion recipe.
+    var effects: MotionEffects? = MotionEffects.sample
 
     var duration: Double {
         spans.last.map { $0.start + $0.duration } ?? 0
@@ -58,11 +61,15 @@ struct MotionProject: Codable, Sendable {
         return Pose(route: sampled.route, center: sampled.route - anchorOffset.rotated(angle), angle: angle)
     }
 
-    var previewDuration: Double { duration * (playback == .pingPong ? 2 : 1) }
+    var previewDuration: Double { effectDuration * (playback == .pingPong ? 2 : 1) }
+
+    var effectSettings: MotionEffects { effects ?? MotionEffects.sample }
+
+    var effectDuration: Double { duration * Double(max(1, min(99, effectSettings.loopCount))) }
 
     /// Display a bounded playhead while the monotonic playback clock continues.
     func playhead(at elapsed: Double) -> Double {
-        playback == .once ? min(duration, max(0, elapsed)) : max(0, elapsed).truncatingRemainder(dividingBy: max(0.001, previewDuration))
+        playback == .once ? min(previewDuration, max(0, elapsed)) : max(0, elapsed).truncatingRemainder(dividingBy: max(0.001, previewDuration))
     }
 
     var nativeExportIssue: String? {
@@ -70,6 +77,10 @@ struct MotionProject: Codable, Sendable {
         guard spans.count == 1, spans[0].start == 0, spans[0].from == 0, spans[0].to == 1 else { return "停靠与分段速度当前仅支持预览，暂不能生成副本。" }
         guard (0.1...600).contains(duration) else { return "导出时长需要在 0.1 至 600 秒之间。" }
         guard playback == .once else { return "循环与往返当前用于预览；生成副本前请切换为单次。" }
+        let advanced = effectSettings
+        if advanced.camera.enabled || !advanced.parallax.isEmpty || !advanced.textCues.isEmpty || advanced.arrayWave.enabled || advanced.audioBeats.enabled || advanced.loopCount > 1 {
+            return "镜头、视差、文字、阵列波浪、声音卡点和多次循环已支持预览与项目保存；原生 Keynote 副本导出将在下一阶段写入对应动画轨道。"
+        }
         if orientation == .routeTangent && (abs(target.anchor.x - 0.5) > 1e-8 || abs(target.anchor.y - 0.5) > 1e-8) {
             return "非中心贴线点导出支持固定朝向；沿线转向的支点仍在验证。"
         }
@@ -95,6 +106,22 @@ struct MotionProject: Codable, Sendable {
               source.sha256.range(of: "^[a-f0-9]{64}$", options: .regularExpression) != nil else {
             throw ProjectError.invalid("项目时长、来源指纹或路线长度无效。")
         }
+        let advanced = effectSettings
+        guard advanced.loopCount >= 1, advanced.loopCount <= 99,
+              advanced.camera.startZoom.isFinite, advanced.camera.endZoom.isFinite,
+              advanced.camera.startZoom > 0, advanced.camera.endZoom > 0,
+              advanced.camera.startCenter.x.isFinite, advanced.camera.startCenter.y.isFinite,
+              advanced.camera.endCenter.x.isFinite, advanced.camera.endCenter.y.isFinite,
+              advanced.parallax.count <= 64,
+              advanced.parallax.allSatisfy({ $0.depth.isFinite && (-4...4).contains($0.depth) && $0.size.x > 0 && $0.size.y > 0 }),
+              advanced.textCues.count <= 128,
+              advanced.textCues.allSatisfy({ $0.duration > 0 && $0.duration.isFinite && $0.position.x.isFinite && $0.position.y.isFinite }),
+              advanced.arrayWave.count >= 1, advanced.arrayWave.count <= 128,
+              advanced.arrayWave.spacing.isFinite, advanced.arrayWave.amplitude.isFinite,
+              advanced.audioBeats.bpm.isFinite, advanced.audioBeats.bpm > 0,
+              advanced.audioBeats.beatsPerBar >= 1, advanced.audioBeats.beatsPerBar <= 16 else {
+            throw ProjectError.invalid("高级动效设置无效。")
+        }
         return self
     }
 
@@ -103,7 +130,8 @@ struct MotionProject: Codable, Sendable {
         let t = max(0, seconds)
         switch playback {
         case .once:
-            return timeline.progress(at: t)
+            let cycle = max(0.001, duration)
+            return timeline.progress(at: effectSettings.loopCount > 1 ? t.truncatingRemainder(dividingBy: cycle) : t)
         case .loop:
             return timeline.progress(at: t.truncatingRemainder(dividingBy: timeline.duration))
         case .pingPong:
@@ -145,7 +173,8 @@ struct MotionProject: Codable, Sendable {
             ],
             drawLine: true,
             playback: .once,
-            fps: 30
+            fps: 30,
+            effects: .sample
         )
     }
 }
